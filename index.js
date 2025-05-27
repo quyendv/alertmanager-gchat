@@ -31,7 +31,11 @@ app.post('/webhook', async (req, res) => {
     }
 
     // Transform Alertmanager payload to Google Chat format
-    const chatMessage = transformAlertToGoogleChat(req.body);
+    // const chatMessage = transformAlertToGoogleChatText(req.body);
+    const chatMessage = transformAlertToGoogleChatCard(req.body);
+    // const chatMessage = transformAlertToSimpleCard(req.body);
+
+    // console.log('raw message', JSON.stringify(chatMessage));
 
     // Send to Google Chat
     const response = await axios.post(GOOGLE_CHAT_WEBHOOK_URL, chatMessage, {
@@ -60,7 +64,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // Transform Alertmanager payload to Google Chat message format
-function transformAlertToGoogleChat(payload) {
+function transformAlertToGoogleChatText(payload) {
   const status = payload.status || 'unknown';
   const receiver = payload.receiver || 'unknown';
   const alerts = payload.alerts || [];
@@ -147,6 +151,388 @@ function getStatusEmoji(status) {
     default:
       return '⚠️';
   }
+}
+
+function transformAlertToGoogleChatCard(payload) {
+  const status = payload.status || 'unknown';
+  const receiver = payload.receiver || 'unknown';
+  const alerts = payload.alerts || [];
+  const groupKey = payload.groupKey || '';
+  const externalURL = payload.externalURL || '';
+
+  // Determine colors and icons based on status
+  const statusConfig = getStatusConfig(status);
+
+  // Create widgets array
+  const widgets = [];
+
+  // Add header info using decoratedText
+  widgets.push({
+    decoratedText: {
+      topLabel: 'Alert Status',
+      text: status.toUpperCase(),
+      startIcon: {
+        iconUrl: statusConfig.iconUrl,
+      },
+    },
+  });
+
+  widgets.push({
+    decoratedText: {
+      topLabel: 'Receiver',
+      text: receiver,
+      startIcon: {
+        knownIcon: 'PERSON',
+      },
+    },
+  });
+
+  widgets.push({
+    decoratedText: {
+      topLabel: 'Alert Count',
+      text: alerts.length.toString(),
+      startIcon: {
+        knownIcon: 'DESCRIPTION',
+      },
+    },
+  });
+
+  if (groupKey) {
+    widgets.push({
+      decoratedText: {
+        topLabel: 'Group Key',
+        text: groupKey,
+        startIcon: {
+          knownIcon: 'BOOKMARK',
+        },
+      },
+    });
+  }
+
+  // Add divider
+  widgets.push({ divider: {} });
+
+  // Add alert details (limit to 3 alerts for readability)
+  const maxAlerts = Math.min(alerts.length, 3);
+
+  for (let i = 0; i < maxAlerts; i++) {
+    const alert = alerts[i];
+    const alertName = alert.labels?.alertname || 'Unknown Alert';
+    const instance = alert.labels?.instance || 'Unknown Instance';
+    const severity = alert.labels?.severity || 'unknown';
+    const summary = alert.annotations?.summary || '';
+    const description = alert.annotations?.description || '';
+
+    // Alert title
+    widgets.push({
+      textParagraph: {
+        text: `<b>🔸 ${alertName}</b>`,
+      },
+    });
+
+    // Instance info
+    widgets.push({
+      decoratedText: {
+        topLabel: 'Instance',
+        text: instance,
+        startIcon: {
+          // knownIcon: 'COMPUTER',
+          iconUrl: 'https://developers.google.com/workspace/chat/images/quickstart-app-avatar.png',
+        },
+      },
+    });
+
+    // Severity info
+    widgets.push({
+      decoratedText: {
+        topLabel: 'Severity',
+        text: severity.toUpperCase(),
+        startIcon: {
+          iconUrl: getSeverityIconUrl(severity),
+        },
+      },
+    });
+
+    // Summary if available
+    if (summary) {
+      widgets.push({
+        decoratedText: {
+          topLabel: 'Summary',
+          text: summary,
+          wrapText: true,
+          startIcon: {
+            knownIcon: 'DESCRIPTION',
+          },
+        },
+      });
+    }
+
+    // Description if available and different from summary
+    if (description && description !== summary) {
+      widgets.push({
+        decoratedText: {
+          topLabel: 'Description',
+          text: description,
+          wrapText: true,
+          startIcon: {
+            knownIcon: 'STAR',
+          },
+        },
+      });
+    }
+
+    // Start time if available
+    if (alert.startsAt) {
+      const startTime = new Date(alert.startsAt).toLocaleString();
+      widgets.push({
+        decoratedText: {
+          topLabel: 'Started At',
+          text: startTime,
+          startIcon: {
+            knownIcon: 'CLOCK',
+          },
+        },
+      });
+    }
+
+    // Add space between alerts
+    if (i < maxAlerts - 1) {
+      widgets.push({ divider: {} });
+    }
+  }
+
+  // Add note if there are more alerts
+  if (alerts.length > 3) {
+    widgets.push({
+      textParagraph: {
+        text: `<i>... and ${alerts.length - 3} more alerts</i>`,
+      },
+    });
+  }
+
+  // Add action buttons if URL available
+  if (externalURL) {
+    widgets.push({ divider: {} });
+
+    const buttons = [
+      {
+        text: 'View in Alertmanager',
+        onClick: {
+          openLink: {
+            url: externalURL,
+          },
+        },
+      },
+    ];
+
+    // Add silence button for firing alerts
+    if (status.toLowerCase() === 'firing') {
+      buttons.push({
+        text: 'Create Silence',
+        onClick: {
+          openLink: {
+            url: `${externalURL}/#/silences/new`,
+          },
+        },
+      });
+    }
+
+    widgets.push({
+      buttonList: {
+        buttons: buttons,
+      },
+    });
+  }
+
+  // Add footer with timestamp
+  widgets.push({ divider: {} });
+
+  widgets.push({
+    textParagraph: {
+      text: `<i>Generated at: ${new Date().toLocaleString()}</i>`,
+    },
+  });
+
+  return {
+    cardsV2: [
+      {
+        cardId: `alert-${Date.now()}`,
+        card: {
+          header: {
+            title: `Prometheus Alert - ${status.toUpperCase()}`,
+            subtitle: `${alerts.length} alert(s) from ${receiver}`,
+            imageUrl: statusConfig.iconUrl,
+            imageType: 'CIRCLE',
+          },
+          sections: [
+            {
+              header: 'Alert Details',
+              collapsible: true,
+              uncollapsibleWidgetsCount: 1,
+              widgets: widgets,
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+// Get status configuration with proper icon URLs
+function getStatusConfig(status) {
+  switch (status.toLowerCase()) {
+    case 'firing':
+      return {
+        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/error/v15/24px.svg',
+      };
+    case 'resolved':
+      return {
+        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/check_circle/v15/24px.svg',
+      };
+    case 'pending':
+      return {
+        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/schedule/v15/24px.svg',
+      };
+    default:
+      return {
+        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/warning/v15/24px.svg',
+      };
+  }
+}
+
+// Get severity icon URL
+function getSeverityIconUrl(severity) {
+  switch (severity.toLowerCase()) {
+    case 'critical':
+      return 'https://fonts.gstatic.com/s/i/googlematerialicons/error/v15/24px.svg';
+    case 'warning':
+      return 'https://fonts.gstatic.com/s/i/googlematerialicons/warning/v15/24px.svg';
+    case 'info':
+      return 'https://fonts.gstatic.com/s/i/googlematerialicons/info/v15/24px.svg';
+    default:
+      return 'https://fonts.gstatic.com/s/i/googlematerialicons/help/v15/24px.svg';
+  }
+}
+
+// Alternative even simpler version using mostly textParagraph
+function transformAlertToSimpleCard(payload) {
+  const status = payload.status || 'unknown';
+  const receiver = payload.receiver || 'unknown';
+  const alerts = payload.alerts || [];
+  const externalURL = payload.externalURL || '';
+
+  const statusConfig = getStatusConfig(status);
+  const statusEmoji = getStatusEmoji(status);
+
+  const widgets = [];
+
+  // Basic info in a single text block
+  widgets.push({
+    textParagraph: {
+      text: `${statusEmoji} <b>Status:</b> ${status.toUpperCase()}<br/>
+             📧 <b>Receiver:</b> ${receiver}<br/>
+             📊 <b>Alert Count:</b> ${alerts.length}`,
+    },
+  });
+
+  widgets.push({
+    divider: {},
+  });
+
+  // Add alert details
+  const maxAlerts = Math.min(alerts.length, 3);
+  for (let i = 0; i < maxAlerts; i++) {
+    const alert = alerts[i];
+    const alertName = alert.labels?.alertname || 'Unknown Alert';
+    const instance = alert.labels?.instance || 'Unknown Instance';
+    const severity = alert.labels?.severity || 'unknown';
+    const summary = alert.annotations?.summary || '';
+
+    let alertText = `🔸 <b>${alertName}</b><br/>`;
+    alertText += `💻 <b>Instance:</b> ${instance}<br/>`;
+    alertText += `⚡ <b>Severity:</b> ${severity.toUpperCase()}`;
+
+    if (summary) {
+      alertText += `<br/>📋 <b>Summary:</b> ${summary}`;
+    }
+
+    if (alert.startsAt) {
+      const startTime = new Date(alert.startsAt).toLocaleString();
+      alertText += `<br/>🕐 <b>Started:</b> ${startTime}`;
+    }
+
+    widgets.push({
+      textParagraph: {
+        text: alertText,
+      },
+    });
+
+    if (i < maxAlerts - 1) {
+      widgets.push({ divider: {} });
+    }
+  }
+
+  if (alerts.length > 3) {
+    widgets.push({
+      textParagraph: {
+        text: `<i>... and ${alerts.length - 3} more alerts</i>`,
+      },
+    });
+  }
+
+  // Add buttons if URL available
+  if (externalURL) {
+    widgets.push({
+      divider: {},
+    });
+
+    widgets.push({
+      buttonList: {
+        buttons: [
+          {
+            text: 'View in Alertmanager',
+            onClick: {
+              openLink: {
+                url: externalURL,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  // Footer
+  widgets.push({
+    divider: {},
+  });
+
+  widgets.push({
+    textParagraph: {
+      text: `<i>Generated at: ${new Date().toLocaleString()}</i>`,
+    },
+  });
+
+  return {
+    cardsV2: [
+      {
+        cardId: `alert-simple-${Date.now()}`,
+        card: {
+          header: {
+            title: 'Prometheus Alert',
+            subtitle: `${status.toUpperCase()} - ${alerts.length} alert(s)`,
+            imageUrl: statusConfig.iconUrl,
+            imageType: 'CIRCLE',
+          },
+          sections: [
+            {
+              widgets: widgets,
+            },
+          ],
+        },
+      },
+    ],
+  };
 }
 
 // Error handling middleware
