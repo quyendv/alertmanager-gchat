@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager-gchat
+  namespace: monitoring
+  labels:
+    app: alertmanager-gchat
+spec:
+  selector:
+    matchLabels:
+      app: alertmanager-gchat
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: alertmanager-gchat
+    spec:
+      containers:
+        - name: alertmanager-gchat
+          image: ghcr.io/quyendv/alertmanager-gchat:latest
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
+          envFrom:
+            - secretRef:
+                name: alertmanager-gchat
+          ports:
+            - containerPort: 3000
+              name: http
+      restartPolicy: Always

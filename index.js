@@ -71,14 +71,14 @@ function transformAlertToGoogleChat(payload) {
   const statusEmoji = getStatusEmoji(status);
 
   // Create message sections
-  let messageText = `${statusEmoji} **Prometheus Alert - ${status.toUpperCase()}**\n\n`;
+  let messageText = `${statusEmoji} *Prometheus Alert - ${status.toUpperCase()}*\n\n`;
 
   // Add basic info
-  messageText += `**Receiver:** ${receiver}\n`;
-  messageText += `**Alerts Count:** ${alerts.length}\n`;
+  messageText += `* Receiver: ${receiver}\n`;
+  messageText += `* Alerts Count: ${alerts.length}\n`;
 
   if (groupKey) {
-    messageText += `**Group:** ${groupKey}\n`;
+    messageText += `* Group: ${groupKey}\n`;
   }
 
   messageText += '\n---\n\n';
@@ -94,24 +94,24 @@ function transformAlertToGoogleChat(payload) {
     const summary = alert.annotations?.summary || '';
     const description = alert.annotations?.description || 'No description available';
 
-    messageText += `**🔸 ${alertName}**\n`;
-    messageText += `**Instance:** ${instance}\n`;
-    messageText += `**Severity:** ${severity.toUpperCase()}\n`;
+    messageText += `*🔸 ${alertName}*\n`;
+    messageText += `* Instance: ${instance}\n`;
+    messageText += `* Severity: ${severity.toUpperCase()}\n`;
 
     if (summary) {
-      messageText += `**Summary:** ${summary}\n`;
+      messageText += `* Summary: ${summary}\n`;
     }
 
     if (description) {
-      messageText += `**Description:** ${description}\n`;
+      messageText += `* Description: ${description}\n`;
     }
 
-    messageText += `**Alert Status:** ${alert.status || 'unknown'}\n`;
+    messageText += `* Alert Status: ${alert.status || 'unknown'}\n`;
 
     // Add timestamp if available
     if (alert.startsAt) {
       const startTime = new Date(alert.startsAt).toLocaleString();
-      messageText += `**Started:** ${startTime}\n`;
+      messageText += `* Started: ${startTime}\n`;
     }
 
     messageText += '\n';
@@ -124,7 +124,7 @@ function transformAlertToGoogleChat(payload) {
 
   // Add external URL
   if (externalURL) {
-    messageText += `🔗 [View in Alertmanager](${externalURL})\n`;
+    messageText += `🔗 <${externalURL}|View in Alertmanager>\n`;
   }
 
   // Add timestamp
