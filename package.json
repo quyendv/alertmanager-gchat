@@ -1,0 +1,35 @@
+{
+  "name": "alertmanager-gchat-transformer",
+  "version": "1.0.0",
+  "description": "Transform Prometheus Alertmanager webhooks to Google Chat format",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "prometheus",
+    "alertmanager",
+    "google-chat",
+    "webhook",
+    "transformer"
+  ],
+  "author": "quyendv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/quyendv/alertmanager-gchat-transformer.git"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.9.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
