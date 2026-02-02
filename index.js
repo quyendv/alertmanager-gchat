@@ -63,96 +63,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Transform Alertmanager payload to Google Chat message format
-function transformAlertToGoogleChatText(payload) {
-  const status = payload.status || 'unknown';
-  const receiver = payload.receiver || 'unknown';
-  const alerts = payload.alerts || [];
-  const groupKey = payload.groupKey || '';
-  const externalURL = payload.externalURL || '';
-
-  // Determine emoji based on status
-  const statusEmoji = getStatusEmoji(status);
-
-  // Create message sections
-  let messageText = `${statusEmoji} *Prometheus Alert - ${status.toUpperCase()}*\n\n`;
-
-  // Add basic info
-  messageText += `* Receiver: ${receiver}\n`;
-  messageText += `* Alerts Count: ${alerts.length}\n`;
-
-  if (groupKey) {
-    messageText += `* Group: ${groupKey}\n`;
-  }
-
-  messageText += '\n---\n\n';
-
-  // Add alert details (limit to 5 alerts to avoid message being too long)
-  const maxAlerts = Math.min(alerts.length, 5);
-
-  for (let i = 0; i < maxAlerts; i++) {
-    const alert = alerts[i];
-    const alertName = alert.labels?.alertname || 'Unknown Alert';
-    const instance = alert.labels?.instance || 'Unknown Instance';
-    const severity = alert.labels?.severity || 'unknown';
-    const summary = alert.annotations?.summary || '';
-    const description = alert.annotations?.description || 'No description available';
-
-    messageText += `*🔸 ${alertName}*\n`;
-    messageText += `* Instance: ${instance}\n`;
-    messageText += `* Severity: ${severity.toUpperCase()}\n`;
-
-    if (summary) {
-      messageText += `* Summary: ${summary}\n`;
-    }
-
-    if (description) {
-      messageText += `* Description: ${description}\n`;
-    }
-
-    messageText += `* Alert Status: ${alert.status || 'unknown'}\n`;
-
-    // Add timestamp if available
-    if (alert.startsAt) {
-      const startTime = new Date(alert.startsAt).toLocaleString();
-      messageText += `* Started: ${startTime}\n`;
-    }
-
-    messageText += '\n';
-  }
-
-  // Add note if there are more alerts
-  if (alerts.length > 5) {
-    messageText += `_... and ${alerts.length - 5} more alerts_\n\n`;
-  }
-
-  // Add external URL
-  if (externalURL) {
-    messageText += `🔗 <${externalURL}|View in Alertmanager>\n`;
-  }
-
-  // Add timestamp
-  messageText += `\n_Generated at: ${new Date().toLocaleString()}_`;
-
-  return {
-    text: messageText,
-  };
-}
-
-// Get appropriate emoji based on alert status
-function getStatusEmoji(status) {
-  switch (status.toLowerCase()) {
-    case 'firing':
-      return '🚨';
-    case 'resolved':
-      return '✅';
-    case 'pending':
-      return '⏳';
-    default:
-      return '⚠️';
-  }
-}
-
 function transformAlertToGoogleChatCard(payload) {
   const status = payload.status || 'unknown';
   const receiver = payload.receiver || 'unknown';
@@ -198,10 +108,13 @@ function transformAlertToGoogleChatCard(payload) {
   });
 
   if (groupKey) {
+    // Parse and format groupKey nicely
+    const formattedGroupKey = formatGroupKey(groupKey);
     widgets.push({
       decoratedText: {
         topLabel: 'Group Key',
-        text: groupKey,
+        text: formattedGroupKey,
+        wrapText: true,
         startIcon: {
           knownIcon: 'BOOKMARK',
         },
@@ -236,8 +149,8 @@ function transformAlertToGoogleChatCard(payload) {
         topLabel: 'Instance',
         text: instance,
         startIcon: {
-          // knownIcon: 'COMPUTER',
-          iconUrl: 'https://developers.google.com/workspace/chat/images/quickstart-app-avatar.png',
+          iconUrl:
+            'https://raw.githubusercontent.com/google/material-design-icons/master/png/action/dns/materialicons/24dp/2x/baseline_dns_black_24dp.png',
         },
       },
     });
@@ -378,161 +291,67 @@ function transformAlertToGoogleChatCard(payload) {
   };
 }
 
-// Get status configuration with proper icon URLs
+// Get status configuration with reliable icon URLs
 function getStatusConfig(status) {
   switch (status.toLowerCase()) {
     case 'firing':
       return {
-        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/error/v15/24px.svg',
+        iconUrl:
+          'https://raw.githubusercontent.com/google/material-design-icons/master/png/alert/error/materialicons/24dp/2x/baseline_error_black_24dp.png',
       };
     case 'resolved':
       return {
-        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/check_circle/v15/24px.svg',
+        iconUrl:
+          'https://raw.githubusercontent.com/google/material-design-icons/master/png/action/check_circle/materialicons/24dp/2x/baseline_check_circle_black_24dp.png',
       };
     case 'pending':
       return {
-        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/schedule/v15/24px.svg',
+        iconUrl:
+          'https://raw.githubusercontent.com/google/material-design-icons/master/png/action/schedule/materialicons/24dp/2x/baseline_schedule_black_24dp.png',
       };
     default:
       return {
-        iconUrl: 'https://fonts.gstatic.com/s/i/googlematerialicons/warning/v15/24px.svg',
+        iconUrl:
+          'https://raw.githubusercontent.com/google/material-design-icons/master/png/alert/warning/materialicons/24dp/2x/baseline_warning_black_24dp.png',
       };
   }
 }
 
-// Get severity icon URL
+// Get severity icon URL - Using reliable GitHub-hosted Material Icons
 function getSeverityIconUrl(severity) {
   switch (severity.toLowerCase()) {
     case 'critical':
-      return 'https://fonts.gstatic.com/s/i/googlematerialicons/error/v15/24px.svg';
+      return 'https://raw.githubusercontent.com/google/material-design-icons/master/png/alert/error/materialicons/24dp/2x/baseline_error_black_24dp.png';
     case 'warning':
-      return 'https://fonts.gstatic.com/s/i/googlematerialicons/warning/v15/24px.svg';
+      return 'https://raw.githubusercontent.com/google/material-design-icons/master/png/alert/warning/materialicons/24dp/2x/baseline_warning_black_24dp.png';
     case 'info':
-      return 'https://fonts.gstatic.com/s/i/googlematerialicons/info/v15/24px.svg';
+      return 'https://raw.githubusercontent.com/google/material-design-icons/master/png/action/info/materialicons/24dp/2x/baseline_info_black_24dp.png';
     default:
-      return 'https://fonts.gstatic.com/s/i/googlematerialicons/help/v15/24px.svg';
+      return 'https://raw.githubusercontent.com/google/material-design-icons/master/png/action/help/materialicons/24dp/2x/baseline_help_black_24dp.png';
   }
 }
 
-// Alternative even simpler version using mostly textParagraph
-function transformAlertToSimpleCard(payload) {
-  const status = payload.status || 'unknown';
-  const receiver = payload.receiver || 'unknown';
-  const alerts = payload.alerts || [];
-  const externalURL = payload.externalURL || '';
+// Format group key for better readability
+function formatGroupKey(groupKey) {
+  try {
+    // GroupKey format: "{}:{alertname="value", label="value", ...}"
+    // or "{namespace}:{label="value", ...}"
 
-  const statusConfig = getStatusConfig(status);
-  const statusEmoji = getStatusEmoji(status);
+    // Parse all key-value pairs
+    const labelRegex = /(\w+)="([^"]+)"/g;
+    const labels = [];
+    let match;
 
-  const widgets = [];
-
-  // Basic info in a single text block
-  widgets.push({
-    textParagraph: {
-      text: `${statusEmoji} <b>Status:</b> ${status.toUpperCase()}<br/>
-             📧 <b>Receiver:</b> ${receiver}<br/>
-             📊 <b>Alert Count:</b> ${alerts.length}`,
-    },
-  });
-
-  widgets.push({
-    divider: {},
-  });
-
-  // Add alert details
-  const maxAlerts = Math.min(alerts.length, 3);
-  for (let i = 0; i < maxAlerts; i++) {
-    const alert = alerts[i];
-    const alertName = alert.labels?.alertname || 'Unknown Alert';
-    const instance = alert.labels?.instance || 'Unknown Instance';
-    const severity = alert.labels?.severity || 'unknown';
-    const summary = alert.annotations?.summary || '';
-
-    let alertText = `🔸 <b>${alertName}</b><br/>`;
-    alertText += `💻 <b>Instance:</b> ${instance}<br/>`;
-    alertText += `⚡ <b>Severity:</b> ${severity.toUpperCase()}`;
-
-    if (summary) {
-      alertText += `<br/>📋 <b>Summary:</b> ${summary}`;
+    while ((match = labelRegex.exec(groupKey)) !== null) {
+      labels.push(`• ${match[1]}: ${match[2]}`);
     }
 
-    if (alert.startsAt) {
-      const startTime = new Date(alert.startsAt).toLocaleString();
-      alertText += `<br/>🕐 <b>Started:</b> ${startTime}`;
-    }
-
-    widgets.push({
-      textParagraph: {
-        text: alertText,
-      },
-    });
-
-    if (i < maxAlerts - 1) {
-      widgets.push({ divider: {} });
-    }
+    // Return formatted list or original if parsing fails
+    return labels.length > 0 ? labels.join('\n') : groupKey;
+  } catch (error) {
+    console.error('Error formatting groupKey:', error);
+    return groupKey; // Return original if parsing fails
   }
-
-  if (alerts.length > 3) {
-    widgets.push({
-      textParagraph: {
-        text: `<i>... and ${alerts.length - 3} more alerts</i>`,
-      },
-    });
-  }
-
-  // Add buttons if URL available
-  if (externalURL) {
-    widgets.push({
-      divider: {},
-    });
-
-    widgets.push({
-      buttonList: {
-        buttons: [
-          {
-            text: 'View in Alertmanager',
-            onClick: {
-              openLink: {
-                url: externalURL,
-              },
-            },
-          },
-        ],
-      },
-    });
-  }
-
-  // Footer
-  widgets.push({
-    divider: {},
-  });
-
-  widgets.push({
-    textParagraph: {
-      text: `<i>Generated at: ${new Date().toLocaleString()}</i>`,
-    },
-  });
-
-  return {
-    cardsV2: [
-      {
-        cardId: `alert-simple-${Date.now()}`,
-        card: {
-          header: {
-            title: 'Prometheus Alert',
-            subtitle: `${status.toUpperCase()} - ${alerts.length} alert(s)`,
-            imageUrl: statusConfig.iconUrl,
-            imageType: 'CIRCLE',
-          },
-          sections: [
-            {
-              widgets: widgets,
-            },
-          ],
-        },
-      },
-    ],
-  };
 }
 
 // Error handling middleware
