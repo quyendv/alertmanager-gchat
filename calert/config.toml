@@ -1,0 +1,26 @@
+# Read once at start, like the template: restart calert after changing either.
+[app]
+address = "0.0.0.0:6000"
+server_timeout = "60s"
+enable_request_logs = true
+log = "info"
+
+# The one room. Alertmanager names it in the webhook URL (?room_name=alerts). Its endpoint, the
+# Google Chat webhook, is a secret: CALERT_PROVIDERS__ALERTS__ENDPOINT from the environment.
+# Without it calert exits at start rather than run with nowhere to send.
+[providers.alerts]
+type = "google_chat"
+template = "/etc/calert/alert-card.tmpl"
+# group: one message per Alertmanager notification, threaded per alert group. Needs
+# send_resolved: true on the receiver, and keeps the thread state in memory (a restart forgets
+# which resolved alerts were already shown, at worst showing one again).
+threading_mode = "group"
+threaded_replies = true
+thread_ttl = "12h"
+dedup_window = "2m"
+max_alerts_per_message = 10
+max_idle_conns = 10
+timeout = "10s"
+retry_max = 3
+retry_wait_min = "1s"
+retry_wait_max = "5s"

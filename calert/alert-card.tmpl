@@ -1,0 +1,141 @@
+{{- /*
+  calert template for threading_mode = "group": one message per Alertmanager notification, threaded
+  per alert group. The message is a one-line text (what a phone notification shows) plus a card.
+
+  The card: title and subtitle (counts, then the group's cluster/namespace/service, which should
+  match the receiver's route.group_by), then one collapsed section: the action buttons, and
+  every alert as a bold title over description, labels and time, each behind an icon.
+
+  A link becomes a button only when it starts with http: Google Chat rejects the whole message
+  when an openLink URL is malformed.
+*/ -}}
+{{ template "emoji" . }} {{ .AlertName }}: {{ template "summary" . }}
+{{- define "emoji" -}}
+{{- if eq .Status "resolved" }}🟢{{ else if eq .Labels.severity "critical" }}🔴{{ else if eq .Labels.severity "warning" }}🟠{{ else if eq .Labels.severity "info" }}🔵{{ else }}⚪{{ end -}}
+{{- end -}}
+{{- /* Counts, then where: "cluster/namespace · service", each part only when the group has it, so an
+       alert from outside a cluster (no such labels) gets just the counts. calert does not pass
+       group labels to a template, so these keys mirror route.group_by (cluster, alertname,
+       namespace, service): change both together.
+       Label values here are Kubernetes names, safe inside a JSON string. */ -}}
+{{- define "summary" -}}
+{{- if and .ResolvedCount .FiringCount }}{{ .FiringCount }} firing, {{ .ResolvedCount }} resolved{{ else if .ResolvedCount }}{{ .ResolvedCount }} resolved{{ else }}{{ .FiringCount }} firing{{ end -}}
+{{- $s := "" -}}
+{{- with .Labels.cluster }}{{ $s = . }}{{ end -}}
+{{- with .Labels.namespace }}{{ if $s }}{{ $s = printf "%s/%s" $s . }}{{ else }}{{ $s = . }}{{ end }}{{ end -}}
+{{- with .Labels.service }}{{ if $s }}{{ $s = printf "%s · %s" $s . }}{{ else }}{{ $s = . }}{{ end }}{{ end -}}
+{{- with $s }} · {{ . }}{{ end -}}
+{{- end -}}
+{{- define "cardsV2" -}}
+{{- /* EDIT FOR YOUR SETUP. calert gives a template only the alerts, not the Alertmanager they came
+       through, so the links are worked out from the alert itself. Its generator URL names the
+       Prometheus (or vmalert) that raised it, hence which Alertmanager it reached: map each
+       evaluator whose Alertmanager a browser can open to that Alertmanager (no match: no Silence
+       button). Query is offered only for an evaluator on a public domain; an in-cluster URL
+       (http://prometheus.monitoring:9090/...) cannot be opened from a phone. */ -}}
+{{- $alertmanagerURL := "" -}}
+{{- if HasPrefix .GeneratorURL "https://prometheus.example.com/" }}{{ $alertmanagerURL = "https://alertmanager.example.com" }}{{ end -}}
+{{- $publicQuery := reReplaceAll "^https?://[^/]+\\.example\\.com/.*" "yes" .GeneratorURL -}}
+{{- /* Times are shown in this zone. */ -}}
+{{- $tz := "Asia/Ho_Chi_Minh" -}}
+{{- /* Not shown per alert: noise, and the group_by labels the subtitle already shows. */ -}}
+{{- $hiddenLabels := " alertname severity prometheus alertgroup endpoint cluster namespace service " -}}
+
+{{- $emoji := "⚪" -}}
+{{- if eq .Status "resolved" }}{{ $emoji = "🟢" }}{{ else if eq .Labels.severity "critical" }}{{ $emoji = "🔴" }}{{ else if eq .Labels.severity "warning" }}{{ $emoji = "🟠" }}{{ else if eq .Labels.severity "info" }}{{ $emoji = "🔵" }}{{ end -}}
+
+{{- /* Buttons for the group: runbook and dashboard of the first alert, its query, and a silence. */ -}}
+{{- $buttons := "" -}}
+{{- with .Annotations.runbook_url }}{{ if HasPrefix . "http" -}}
+{{- $buttons = printf "%s{\"text\":\"Runbook\",\"onClick\":{\"openLink\":{\"url\":%s}}}" $buttons (json .) -}}
+{{- end }}{{ end -}}
+{{- with .Annotations.dashboard_url }}{{ if HasPrefix . "http" -}}
+{{- if $buttons }}{{ $buttons = printf "%s," $buttons }}{{ end -}}
+{{- $buttons = printf "%s{\"text\":\"Dashboard\",\"onClick\":{\"openLink\":{\"url\":%s}}}" $buttons (json .) -}}
+{{- end }}{{ end -}}
+{{- with .GeneratorURL }}{{ if eq $publicQuery "yes" -}}
+{{- if $buttons }}{{ $buttons = printf "%s," $buttons }}{{ end -}}
+{{- $buttons = printf "%s{\"text\":\"Query\",\"onClick\":{\"openLink\":{\"url\":%s}}}" $buttons (json .) -}}
+{{- end }}{{ end -}}
+{{- if and $alertmanagerURL .FiringCount -}}
+{{- $matchers := printf "alertname=\"%s\"" .AlertName -}}
+{{- with .Labels.cluster }}{{ $matchers = printf "%s,cluster=\"%s\"" $matchers . }}{{ end -}}
+{{- with .Labels.namespace }}{{ $matchers = printf "%s,namespace=\"%s\"" $matchers . }}{{ end -}}
+{{- with .Labels.service }}{{ $matchers = printf "%s,service=\"%s\"" $matchers . }}{{ end -}}
+{{- if $buttons }}{{ $buttons = printf "%s," $buttons }}{{ end -}}
+{{- $buttons = printf "%s{\"text\":\"Silence\",\"onClick\":{\"openLink\":{\"url\":%s}}}" $buttons (json (printf "%s/#/silences/new?filter=%s" $alertmanagerURL (Replace (urlquery (printf "{%s}" $matchers)) "+" "%20"))) -}}
+{{- end -}}
+
+{{- /* When every alert has the same summary, say it once and title each alert by its own labels. */ -}}
+{{- $shared := "" -}}
+{{- if gt (len .Alerts) 1 -}}
+{{- $shared = (index .Alerts 0).Annotations.summary -}}
+{{- range .Alerts }}{{ if ne .Annotations.summary $shared }}{{ $shared = "" }}{{ end }}{{ end -}}
+{{- end -}}
+
+{{- $widgets := "" -}}
+{{- with $shared -}}
+{{- $widgets = printf "{\"decoratedText\":{\"startIcon\":{\"materialIcon\":{\"name\":\"description\"}},\"text\":%s,\"wrapText\":true}}" (json .) -}}
+{{- end -}}
+{{- range .Alerts -}}
+{{- $own := "" -}}
+{{- $values := "" -}}
+{{- range .Labels.SortedPairs -}}
+{{- if not (Contains $hiddenLabels (printf " %s " .Name)) -}}
+{{- if $own }}{{ $own = printf "%s · " $own }}{{ $values = printf "%s · " $values }}{{ end -}}
+{{- $own = printf "%s%s: %s" $own .Name .Value -}}
+{{- $values = printf "%s%s" $values .Value -}}
+{{- end -}}
+{{- end -}}
+{{- $title := .Annotations.summary | Default (.Labels.instance | Default .Labels.alertname) -}}
+{{- if $shared }}{{ $title = $values | Default .Fingerprint }}{{ end -}}
+{{- $title = Replace (Replace $title "&" "&amp;") "<" "&lt;" -}}
+{{- $bullet := "🔸" -}}
+{{- $when := printf "Since %s · %s" (ConvertTZ .StartsAt $tz) (reReplaceAll " [0-9]+s$" "" (DurationSince .StartsAt)) -}}
+{{- if ne .Status "firing" -}}
+{{- $bullet = "<font color=\"#188038\">✔</font>" -}}
+{{- $when = printf "Resolved %s" (ConvertTZ .EndsAt $tz) -}}
+{{- end -}}
+{{- $when = reReplaceAll ":[0-9]{2} " " " $when -}}
+
+{{- if $widgets }}{{ $widgets = printf "%s,{\"divider\":{}}," $widgets }}{{ end -}}
+{{- $widgets = printf "%s{\"textParagraph\":{\"text\":%s}}" $widgets (json (printf "<b>%s %s</b>" $bullet $title)) -}}
+{{- with .Annotations.description -}}
+{{- $widgets = printf "%s,{\"decoratedText\":{\"startIcon\":{\"materialIcon\":{\"name\":\"notes\"}},\"text\":%s,\"wrapText\":true}}" $widgets (json .) -}}
+{{- end -}}
+{{- if and $own (not $shared) -}}
+{{- $widgets = printf "%s,{\"decoratedText\":{\"startIcon\":{\"materialIcon\":{\"name\":\"label\"}},\"text\":%s,\"wrapText\":true}}" $widgets (json $own) -}}
+{{- end -}}
+{{- $widgets = printf "%s,{\"decoratedText\":{\"startIcon\":{\"materialIcon\":{\"name\":\"schedule\"}},\"text\":%s}}" $widgets (json $when) -}}
+{{- range .Annotations.SortedPairs -}}
+{{- if not (Contains " summary description " (printf " %s " .Name)) -}}
+{{- if not (and (Contains " runbook_url dashboard_url " (printf " %s " .Name)) (HasPrefix .Value "http")) -}}
+{{- $widgets = printf "%s,{\"decoratedText\":{\"startIcon\":{\"materialIcon\":{\"name\":\"info\"}},\"topLabel\":%s,\"text\":%s,\"wrapText\":true}}" $widgets (json .Name) (json .Value) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if gt .Overflow.Count 0 -}}
+{{- $widgets = printf "%s,{\"divider\":{}},{\"textParagraph\":{\"text\":%s}}" $widgets (json (printf "<i>… and %d more (%d firing, %d resolved)</i>" .Overflow.Count .Overflow.Firing .Overflow.Resolved)) -}}
+{{- end -}}
+{{- if gt .TruncatedAlerts 0 -}}
+{{- if $widgets }}{{ $widgets = printf "%s," $widgets }}{{ end -}}
+{{- $widgets = printf "%s{\"textParagraph\":{\"text\":%s}}" $widgets (json (printf "<i>Alertmanager left out %d more alerts</i>" .TruncatedAlerts)) -}}
+{{- end -}}
+{
+  "cardId": {{ json .TrackingKey }},
+  "card": {
+    "header": {
+      "title": {{ json (printf "%s %s" $emoji .AlertName) }},
+      "subtitle": "{{ template "summary" . }}"
+    },
+    "sections": [
+      {
+        "collapsible": true,
+        "uncollapsibleWidgetsCount": 0,
+        "widgets": [ {{ with $buttons }}{ "buttonList": { "buttons": [ {{ . }} ] } },{ "divider": {} },{{ end }}{{ $widgets }} ]
+      }
+    ]
+  }
+}
+{{- end -}}
