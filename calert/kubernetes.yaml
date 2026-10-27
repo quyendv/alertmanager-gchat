@@ -1,0 +1,90 @@
+# calert in Kubernetes, next to Alertmanager. Create the ConfigMap from the two files beside this
+# one, and a Secret holding the Chat webhook (the same Secret this repo's k8s/secret.yaml made):
+#
+#   kubectl -n monitoring create configmap calert \
+#     --from-file=config.toml --from-file=alert-card.tmpl
+#
+# calert reads both files once at start: restart it after changing either
+# (kubectl -n monitoring rollout restart deploy/calert), or put a checksum of them in a pod
+# annotation if a tool renders this for you.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calert
+  namespace: monitoring
+  labels:
+    app: calert
+spec:
+  # One replica: group threading keeps its state in memory; two would post everything twice.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calert
+  template:
+    metadata:
+      labels:
+        app: calert
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: calert
+          # Pin a digest in production: docker buildx imagetools inspect <image>
+          image: ghcr.io/mr-karan/calert:v2.4.0-scratch
+          args: ["--config", "/etc/calert/config.toml"]
+          env:
+            - name: CALERT_PROVIDERS__ALERTS__ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: alertmanager-gchat
+                  key: GOOGLE_CHAT_WEBHOOK_URL
+          ports:
+            - name: http
+              containerPort: 6000
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/calert
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: calert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calert
+  namespace: monitoring
+  labels:
+    app: calert
+spec:
+  selector:
+    app: calert
+  ports:
+    - name: http
+      port: 6000
+      targetPort: http
